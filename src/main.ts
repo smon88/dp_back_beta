@@ -34,17 +34,18 @@ import { GetSession } from "./core/application/usecases/GetSession.js";
 import { UserGetSession } from "./core/application/usecases/UserGetSession.js";
 
 const PORT = Number(process.env.PORT || 3005);
-const ORIGIN = process.env.LARAVEL_ORIGIN || "http://localhost:8000";
+const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://localhost:8000";
+const ORIGIN2 = process.env.LARAVEL_ORIGIN1 || "http://localhost:8001";
 
 const app = express();
 app.use(express.json());
 app.use(helmet());
 app.use(rateLimit({ windowMs: 60_000, max: 120 }));
-app.use(cors({ origin: ORIGIN, credentials: true }));
+app.use(cors({ origin: [ORIGIN1, ORIGIN2], credentials: true }));
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: ORIGIN, credentials: true },
+  cors: { origin: [ORIGIN1, ORIGIN2], credentials: true },
 });
 
 // ---- Outbound adapters
