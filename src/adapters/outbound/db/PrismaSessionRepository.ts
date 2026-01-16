@@ -1,8 +1,10 @@
+import type { SessionRepository } from '../../../core/application/ports/SessionRepository.js';
 import { prisma } from './prismaClient.js';
 
-export class PrismaSessionRepository {
+export class PrismaSessionRepository implements SessionRepository {
   async create(data: any) {
-    return prisma.session.create({data});
+    const { rt_session_id, rt_session_token, ...clean } = data;
+    return prisma.session.create({data: clean});
   }
 
   async findById(id: string) {
