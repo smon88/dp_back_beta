@@ -36,6 +36,10 @@ import { UserSubmitData } from "./core/application/usecases/UserSubmitData.js";
 import { AdminRequestData } from "./core/application/usecases/AdminRequestData.js";
 import { AdminRejectData } from "./core/application/usecases/AdminRejectData.js";
 import { AdminRequestAuth } from "./core/application/usecases/AdminRequestAuth.js";
+import { registerPresenceHandlers } from "./adapters/inbound/ws/handlers/PresenceHandlers.js";
+import { NodePresenceTimer } from "./adapters/outbound/timers/NodePresenceTimer.js";
+import { MarkInactiveLater } from "./core/application/usecases/MarkInactiveLater.js";
+import { SetPresence } from "./core/application/usecases/SetPresence.js";
 
 const PORT = Number(process.env.PORT || 3005);
 const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://192.168.1.26:8000";
@@ -80,11 +84,18 @@ const requestOtp = new AdminRequestOtp(repo, rt);
 const rejectOtp = new AdminRejectOtp(repo, rt);
 
 /* user */
+
 const submitData = new UserSubmitData(repo, rt);
 const submitAuth = new UserSubmitAuth(repo, rt);
 const submitDinamic = new UserSubmitDinamic(repo, rt);
 const submitOtp = new UserSubmitOtp(repo, rt);
 const userGetSession = new UserGetSession(repo);
+
+/* state handlers */
+const setPresence = new SetPresence(repo, rt);
+const presenceTimer = new NodePresenceTimer();
+const markInactiveLater = new MarkInactiveLater(presenceTimer, setPresence);
+
 
 // ---- Controllers + routes
 const sessionsController = new SessionsController(
@@ -123,6 +134,11 @@ io.on("connection", async (socket) => {
   if (auth.role === "user") {
     const sessionId = auth.sessionId;
     socket.join(`session:${sessionId}`);
+    registerPresenceHandlers(socket, {
+      setPresence,
+      markInactiveLater,
+      inactiveDelayMs: 8000,
+    });
     registerUserHandlers(socket, { submitAuth, submitDinamic, submitOtp, userGetSession, submitData });
   }
 });
