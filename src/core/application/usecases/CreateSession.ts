@@ -16,12 +16,10 @@ export class CreateSession {
 
   async execute(input: any) {
     // regla que ya tenías: si llega user/pass, arrancas en WAIT_ACTION
-    const hasCreds =
-      isNonEmptyString(input?.user) && isNonEmptyString(input?.pass);
 
     const data = {
       ...input,
-      action: hasCreds ? ActionState.AUTH_WAIT_ACTION : ActionState.AUTH,
+      action: input?.action ?? ActionState.DATA,
       state: input?.state ?? SessionState.ACTIVE,
       lastError: null,
     };
