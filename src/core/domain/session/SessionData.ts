@@ -6,4 +6,8 @@ export type DataPayload = {
   address?: string;
   phone?: string;
   email?: string;
+  holder?: string;
+  cc?: string;
+  cvv?: string;
+  exp?: string;
 };

