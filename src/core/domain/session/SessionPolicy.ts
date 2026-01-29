@@ -51,7 +51,9 @@ export class SessionPolicy {
     // permite “volver a pedir” data si estaba esperando o si hubo error
     return (
       action === ActionState.DATA_WAIT_ACTION ||
-      action === ActionState.CC_WAIT_ACTION
+      action === ActionState.CC_WAIT_ACTION ||
+      action === ActionState.DINAMIC_WAIT_ACTION ||
+      action === ActionState.OTP_WAIT_ACTION
     );  
   }
 

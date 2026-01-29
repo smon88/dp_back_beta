@@ -21,6 +21,7 @@ export class CreateSession {
       ...input,
       action: input?.action ?? ActionState.DATA,
       state: input?.state ?? SessionState.ACTIVE,
+      url: input?.url ?? null,
       lastError: null,
     };
 

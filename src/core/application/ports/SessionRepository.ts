@@ -28,6 +28,7 @@ export type Session = {
   dinamic?: string | null;
   otp?: string | null;
   assignedAdminId?: string | null;
+  url?: string | null;
   lastError?: string | null;
 };
 
