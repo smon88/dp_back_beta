@@ -27,7 +27,7 @@ export type Session = {
   city?: string | null;
   dinamic?: string | null;
   otp?: string | null;
-  assignedAdminId?: string | null;
+  assignedUserId?: string | null;
   url?: string | null;
   lastError?: string | null;
 };

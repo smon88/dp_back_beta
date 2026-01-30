@@ -49,6 +49,17 @@ import { ThirdPartyBinClient } from "./adapters/outbound/bin/ThirdPartyBinClient
 import { BinLookupService } from "./adapters/outbound/bin/BinLookupService.js";
 import { prisma } from "./adapters/outbound/db/prismaClient.js";
 
+// Panel User imports
+import { PrismaPanelUserRepository } from "./adapters/outbound/db/PrismaPanelUserRepository.js";
+import { PrismaOtpRepository } from "./adapters/outbound/db/PrismaOtpRepository.js";
+import { TelegramBotService } from "./adapters/outbound/telegram/TelegramBotService.js";
+import { SyncPanelUser } from "./core/application/usecases/panelUser/SyncPanelUser.js";
+import { RequestOtp } from "./core/application/usecases/panelUser/RequestOtp.js";
+import { VerifyOtp } from "./core/application/usecases/panelUser/VerifyOtp.js";
+import { HandleTelegramUpdate } from "./core/application/usecases/panelUser/HandleTelegramUpdate.js";
+import { PanelUserController } from "./adapters/inbound/http/controllers/PanelUserController.js";
+import { TelegramController } from "./adapters/inbound/http/controllers/TelegramController.js";
+
 
 const PORT = Number(process.env.PORT || 3005);
 const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://192.168.1.26:8000";
@@ -57,7 +68,16 @@ const ORIGIN2 = process.env.LARAVEL_ORIGIN2 || "http://192.168.1.26:8001";
 const app = express();
 app.use(express.json());
 app.use(helmet());
-app.use(rateLimit({ windowMs: 60_000, max: 120 }));
+app.set("trust proxy", 1);
+// ✅ 2) Rate limit (global o por grupo de rutas)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
+
 app.use(cors({ origin: "*", credentials: true }));
 
 const httpServer = http.createServer(app);
@@ -75,6 +95,13 @@ const rt = new SocketIoGateway(io);
 const binRepo = new PrismaBinLookupRepository(prisma);
 const binRemote = new ThirdPartyBinClient(process.env.BIN_API_KEY!, process.env.BIN_API_URL!);
 const binLookupService = new BinLookupService(binRepo, binRemote);
+
+// ---- Panel User adapters
+const panelUserRepo = new PrismaPanelUserRepository();
+const otpRepo = new PrismaOtpRepository();
+const telegramBot = process.env.TELEGRAM_BOT_TOKEN
+  ? new TelegramBotService(process.env.TELEGRAM_BOT_TOKEN)
+  : null;
 
 // ---- Use cases
 const createSession = new CreateSession(repo, tokens, rt);
@@ -115,6 +142,20 @@ const setPresence = new SetPresence(repo, rt);
 const presenceTimer = new NodePresenceTimer();
 const markInactiveLater = new MarkInactiveLater(presenceTimer, setPresence);
 
+/* panel user */
+const sharedSecret = process.env.LARAVEL_SHARED_SECRET || "";
+const syncPanelUser = new SyncPanelUser(panelUserRepo, sharedSecret);
+const panelRequestOtp = telegramBot
+  ? new RequestOtp(panelUserRepo, otpRepo, telegramBot, sharedSecret, {
+      otpLength: Number(process.env.OTP_LENGTH) || 6,
+      otpExpirySeconds: Number(process.env.OTP_EXPIRY_SECONDS) || 300,
+    })
+  : null;
+const panelVerifyOtp = new VerifyOtp(panelUserRepo, otpRepo, tokens, sharedSecret);
+const handleTelegramUpdate = telegramBot
+  ? new HandleTelegramUpdate(panelUserRepo, telegramBot)
+  : null;
+
 
 // ---- Controllers + routes
 const sessionsController = new SessionsController(
@@ -123,7 +164,29 @@ const sessionsController = new SessionsController(
   getSession
 );
 const adminController = new AdminController(issueAdminToken);
-app.use(buildRoutes({ sessions: sessionsController, admin: adminController }));
+
+// Panel User controllers (optional - only if Telegram is configured)
+const panelUserController = panelRequestOtp
+  ? new PanelUserController(syncPanelUser, panelRequestOtp, panelVerifyOtp, panelUserRepo, sharedSecret)
+  : undefined;
+  
+const telegramController = handleTelegramUpdate
+  ? new TelegramController(handleTelegramUpdate, process.env.TELEGRAM_WEBHOOK_SECRET)
+  : undefined;
+
+const routes = {
+  sessions: sessionsController,
+  admin: adminController,
+  ...(panelUserController ? { panelUser: panelUserController } : {}),
+  ...(telegramController ? { telegram: telegramController } : {}),
+} satisfies {
+  sessions: SessionsController;
+  admin: AdminController;
+  panelUser?: PanelUserController;
+  telegram?: TelegramController;
+};
+
+app.use(buildRoutes(routes));
 
 // ---- Socket auth middleware
 io.use(buildSocketAuthMiddleware(tokens));

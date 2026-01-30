@@ -1,10 +1,14 @@
 import { Router } from "express";
 import { SessionsController } from "./controllers/SessionsController.js";
 import { AdminController } from "./controllers/AdminController.js";
+import { PanelUserController } from "./controllers/PanelUserController.js";
+import { TelegramController } from "./controllers/TelegramController.js";
 
 export function buildRoutes(controllers: {
   sessions: SessionsController;
   admin: AdminController;
+  panelUser?: PanelUserController;
+  telegram?: TelegramController;
 }) {
   const r = Router();
 
@@ -13,8 +17,24 @@ export function buildRoutes(controllers: {
   r.post("/api/sessions/:id/issue-token", controllers.sessions.issueToken);
   r.get("/api/sessions/:id", controllers.sessions.getById);
 
-
   r.post("/api/admin/issue-token", controllers.admin.issueToken);
+
+  // Panel User routes
+  if (controllers.panelUser) {
+    r.post("/api/panel-users/sync", controllers.panelUser.sync);
+    r.post("/api/panel-users/request-otp", controllers.panelUser.requestOtpHandler);
+    r.post("/api/panel-users/verify-otp", controllers.panelUser.verifyOtpHandler);
+  }
+
+  // Telegram webhook
+  if (controllers.telegram) {
+    r.post("/api/telegram/webhook", controllers.telegram.webhook);
+  }
+
+  // DEV: Vincular Telegram manualmente (sin webhook)
+  if (controllers.panelUser) {
+    r.post("/api/panel-users/link-telegram", controllers.panelUser.linkTelegramManually);
+  }
 
   return r;
 }
