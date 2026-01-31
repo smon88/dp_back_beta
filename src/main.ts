@@ -60,6 +60,12 @@ import { HandleTelegramUpdate } from "./core/application/usecases/panelUser/Hand
 import { PanelUserController } from "./adapters/inbound/http/controllers/PanelUserController.js";
 import { TelegramController } from "./adapters/inbound/http/controllers/TelegramController.js";
 
+// Project imports
+import { PrismaProjectRepository } from "./adapters/outbound/db/PrismaProjectRepository.js";
+import { SyncProject } from "./core/application/usecases/project/SyncProject.js";
+import { SyncProjectMember } from "./core/application/usecases/project/SyncProjectMember.js";
+import { ProjectController } from "./adapters/inbound/http/controllers/ProjectController.js";
+
 
 const PORT = Number(process.env.PORT || 3005);
 const ORIGIN1 = process.env.LARAVEL_ORIGIN1 || "http://192.168.1.26:8000";
@@ -103,6 +109,9 @@ const telegramBot = process.env.TELEGRAM_BOT_TOKEN
   ? new TelegramBotService(process.env.TELEGRAM_BOT_TOKEN)
   : null;
 
+// ---- Project adapters
+const projectRepo = new PrismaProjectRepository();
+
 // ---- Use cases
 const createSession = new CreateSession(repo, tokens, rt);
 const getSession = new GetSession(repo);
@@ -115,7 +124,7 @@ const issueAdminToken = new IssueAdminToken(
 
 /* admin */
 
-const adminBootstrap = new AdminBootstrap(repo, rt);
+const adminBootstrap = new AdminBootstrap(repo, projectRepo, rt);
 const requestAuth = new AdminRequestAuth(repo, rt);
 const rejectAuth = new AdminRejectAuth(repo, rt);
 const requestCc = new AdminRequestCc(repo, rt);
@@ -156,6 +165,9 @@ const handleTelegramUpdate = telegramBot
   ? new HandleTelegramUpdate(panelUserRepo, telegramBot)
   : null;
 
+/* project */
+const syncProject = new SyncProject(projectRepo, sharedSecret);
+const syncProjectMember = new SyncProjectMember(projectRepo, panelUserRepo, sharedSecret);
 
 // ---- Controllers + routes
 const sessionsController = new SessionsController(
@@ -174,14 +186,23 @@ const telegramController = handleTelegramUpdate
   ? new TelegramController(handleTelegramUpdate, process.env.TELEGRAM_WEBHOOK_SECRET)
   : undefined;
 
+const projectController = new ProjectController(
+  syncProject,
+  syncProjectMember,
+  projectRepo,
+  sharedSecret
+);
+
 const routes = {
   sessions: sessionsController,
   admin: adminController,
+  project: projectController,
   ...(panelUserController ? { panelUser: panelUserController } : {}),
   ...(telegramController ? { telegram: telegramController } : {}),
 } satisfies {
   sessions: SessionsController;
   admin: AdminController;
+  project: ProjectController;
   panelUser?: PanelUserController;
   telegram?: TelegramController;
 };
@@ -196,10 +217,28 @@ io.on("connection", async (socket) => {
   const auth = socket.data.auth;
 
   if (auth.role === "admin") {
-    socket.join("admins");
+    console.log("[WS] Admin connected:", { panelUserId: auth.panelUserId, panelRole: auth.panelRole });
+
+    // Unir a salas según rol
+    if (auth.panelRole === "ADMIN") {
+      socket.join("admins:all");  // Admin ve todas las sesiones
+      console.log("[WS] Joined admins:all room");
+    } else {
+      // Usuario normal: unir a salas de sus proyectos aprobados
+      const userProjects = await projectRepo.findProjectsByUser(auth.panelUserId, "APPROVED");
+      console.log("[WS] User projects:", userProjects.map(p => p.projectId));
+      for (const up of userProjects) {
+        socket.join(`project:${up.projectId}`);
+      }
+    }
 
      // ✅ cada vez que un admin inicia sesión / conecta
-    await adminBootstrap.execute({ socketId: socket.id, limit: 200 });
+    await adminBootstrap.execute({
+      socketId: socket.id,
+      panelUserId: auth.panelUserId,
+      panelRole: auth.panelRole,
+      limit: 200
+    });
 
     registerAdminHandlers(socket, {
       requestData,

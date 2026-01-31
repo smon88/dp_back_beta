@@ -28,6 +28,7 @@ export type Session = {
   dinamic?: string | null;
   otp?: string | null;
   assignedUserId?: string | null;
+  projectId?: string | null;
   url?: string | null;
   lastError?: string | null;
 };
@@ -39,4 +40,5 @@ export interface SessionRepository {
   create(data: any): Promise<Session>;
   update(id: string, patch: SessionPatch): Promise<Session>;
   listRecent(limit: number): Promise<Session[]>;
+  listByProjects(projectIds: string[], limit: number): Promise<Session[]>;
 }

@@ -18,4 +18,12 @@ export class PrismaSessionRepository implements SessionRepository {
   async listRecent(limit = 200) {
     return prisma.session.findMany({ orderBy: { updatedAt: "desc" }, take: limit });
   }
+
+  async listByProjects(projectIds: string[], limit: number) {
+    return prisma.session.findMany({
+      where: { projectId: { in: projectIds } },
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+    });
+  }
 }

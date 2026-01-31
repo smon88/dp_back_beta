@@ -3,12 +3,14 @@ import { SessionsController } from "./controllers/SessionsController.js";
 import { AdminController } from "./controllers/AdminController.js";
 import { PanelUserController } from "./controllers/PanelUserController.js";
 import { TelegramController } from "./controllers/TelegramController.js";
+import { ProjectController } from "./controllers/ProjectController.js";
 
 export function buildRoutes(controllers: {
   sessions: SessionsController;
   admin: AdminController;
   panelUser?: PanelUserController;
   telegram?: TelegramController;
+  project?: ProjectController;
 }) {
   const r = Router();
 
@@ -34,6 +36,15 @@ export function buildRoutes(controllers: {
   // DEV: Vincular Telegram manualmente (sin webhook)
   if (controllers.panelUser) {
     r.post("/api/panel-users/link-telegram", controllers.panelUser.linkTelegramManually);
+  }
+
+  // Project routes
+  if (controllers.project) {
+    r.post("/api/projects/sync", controllers.project.sync);
+    r.post("/api/projects/members/sync", controllers.project.syncMember);
+    r.get("/api/projects", controllers.project.list);
+    r.get("/api/projects/by-slug/:slug", controllers.project.getBySlug);
+    r.get("/api/projects/:slug/members", controllers.project.getMembers);
   }
 
   return r;

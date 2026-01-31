@@ -51,6 +51,53 @@ enum PanelRole {
   USER
 }
 
+enum ProjectRole {
+  OWNER      // Creador del proyecto (admin del sistema)
+  USERADMIN  // Puede gestionar usuarios del proyecto
+  USER       // Usuario normal, solo puede operar
+}
+
+enum MemberStatus {
+  PENDING   // Solicitud pendiente
+  APPROVED  // Aprobado
+  REJECTED  // Rechazado
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  url         String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sessions    Session[]
+  users       PanelUserProject[]
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model PanelUserProject {
+  id          String       @id @default(uuid())
+  panelUserId String
+  projectId   String
+  role        ProjectRole  @default(USER)
+  status      MemberStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  panelUser   PanelUser @relation(fields: [panelUserId], references: [id], onDelete: Cascade)
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([panelUserId, projectId])
+  @@index([panelUserId])
+  @@index([projectId])
+  @@index([status])
+}
+
 model Session {
   id                    String       @id @default(uuid())
   state                 SessionState @default(ACTIVE)
@@ -86,12 +133,17 @@ model Session {
   assignedUserId        String?
   assignedUser          PanelUser? @relation("AssignedSessions", fields: [assignedUserId], references: [id])
 
+  // Relación con Project
+  projectId             String?
+  project               Project? @relation(fields: [projectId], references: [id])
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   @@index([state])
   @@index([updatedAt])
   @@index([assignedUserId])
+  @@index([projectId])
 }
 
 model PanelUser {
@@ -110,6 +162,7 @@ model PanelUser {
   // Relaciones
   assignedSessions Session[] @relation("AssignedSessions")
   otpCodes         OtpCode[]
+  projects         PanelUserProject[]
 
   @@index([username])
   @@index([laravelId])

@@ -6,9 +6,10 @@ export class AdminController {
 
   issueToken = async (req: Request, res: Response) => {
     const providedSecret = req.header("X-SHARED-SECRET");
-    const adminId = req.header("X-Admin-Id") || "";
+    const panelUserId = req.header("X-Panel-User-Id") || "";
+    const panelRole = (req.header("X-Panel-Role") || "USER") as "ADMIN" | "USER";
 
-    const result = await this.issueAdminToken.execute({ providedSecret, adminId });
+    const result = await this.issueAdminToken.execute({ providedSecret, panelUserId, panelRole });
     if (!result.ok) return res.status(401).json({ error: "unauthorized" });
 
     res.json({ token: result.token });

@@ -1,15 +1,19 @@
 import jwt from "jsonwebtoken";
 
-type TokenPayload = 
+type TokenPayload =
   | {role: "user"; sessionId: string}
-  | {role: "admin"; adminId: string}
+  | {role: "admin"; panelUserId: string; panelRole: "ADMIN" | "USER"}
 
 
 export class JwtTokenService {
   constructor(private secret: string) {}
 
-  signAdmin(adminId: string) {
-    return jwt.sign({ role: "admin", adminId } satisfies TokenPayload, this.secret, { expiresIn: "15m" });
+  signPanelUser(panelUserId: string, panelRole: "ADMIN" | "USER") {
+    return jwt.sign(
+      { role: "admin", panelUserId, panelRole } satisfies TokenPayload,
+      this.secret,
+      { expiresIn: "8h" }
+    );
   }
 
   signUser(guestId: string) {

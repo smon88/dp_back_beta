@@ -51,7 +51,7 @@ export class VerifyOtp {
     });
 
     // Generar JWT para WebSocket
-    const token = this.tokenService.signAdmin(panelUser.id);
+    const token = this.tokenService.signPanelUser(panelUser.id, panelUser.role);
 
     return {
       ok: true as const,
