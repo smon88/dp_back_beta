@@ -167,7 +167,7 @@ const handleTelegramUpdate = telegramBot
 
 /* project */
 const syncProject = new SyncProject(projectRepo, sharedSecret);
-const syncProjectMember = new SyncProjectMember(projectRepo, panelUserRepo, sharedSecret);
+const syncProjectMember = new SyncProjectMember(projectRepo, panelUserRepo, rt, sharedSecret);
 
 // ---- Controllers + routes
 const sessionsController = new SessionsController(
@@ -219,6 +219,21 @@ io.on("connection", async (socket) => {
   if (auth.role === "admin") {
     console.log("[WS] Admin connected:", { panelUserId: auth.panelUserId, panelRole: auth.panelRole });
 
+    // Registrar socket del panel user para mensajes directos
+    rt.registerPanelUser(auth.panelUserId, socket.id);
+
+    // Obtener datos del usuario para emitir presencia
+    const panelUser = await panelUserRepo.findById(auth.panelUserId);
+    if (panelUser) {
+      rt.emitPanelUserOnline({
+        odId: panelUser.id,
+        username: panelUser.username,
+        alias: panelUser.alias,
+        role: panelUser.role,
+        isOnline: true,
+      });
+    }
+
     // Unir a salas según rol
     if (auth.panelRole === "ADMIN") {
       socket.join("admins:all");  // Admin ve todas las sesiones
@@ -232,7 +247,7 @@ io.on("connection", async (socket) => {
       }
     }
 
-     // ✅ cada vez que un admin inicia sesión / conecta
+    // ✅ cada vez que un admin inicia sesión / conecta
     await adminBootstrap.execute({
       socketId: socket.id,
       panelUserId: auth.panelUserId,
@@ -252,6 +267,13 @@ io.on("connection", async (socket) => {
       requestOtp,
       rejectOtp,
       requestFinish
+    });
+
+    // Manejar desconexión de admin
+    socket.on("disconnect", () => {
+      console.log("[WS] Admin disconnected:", { panelUserId: auth.panelUserId });
+      rt.unregisterPanelUser(auth.panelUserId);
+      rt.emitPanelUserOffline(auth.panelUserId);
     });
   }
 

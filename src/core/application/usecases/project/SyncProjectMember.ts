@@ -1,5 +1,6 @@
 import type { ProjectRepository } from "../../ports/ProjectRepository.js";
 import type { PanelUserRepository } from "../../ports/PanelUserRepository.js";
+import type { RealtimeGateway } from "../../ports/RealtimeGateway.js";
 import { ProjectRole, MemberStatus } from "@prisma/client";
 
 type SyncMemberInput = {
@@ -14,6 +15,7 @@ export class SyncProjectMember {
   constructor(
     private projectRepo: ProjectRepository,
     private panelUserRepo: PanelUserRepository,
+    private rt: RealtimeGateway,
     private sharedSecret: string
   ) {}
 
@@ -42,11 +44,26 @@ export class SyncProjectMember {
       const existing = await this.projectRepo.findMember(panelUser.id, project.id);
 
       if (existing) {
+        const oldStatus = existing.status;
         // Actualizar si ya existe
         const member = await this.projectRepo.updateMember(panelUser.id, project.id, {
           role,
           status,
         });
+
+        // Notificar cambio de estado si cambió a APPROVED o REJECTED
+        if (oldStatus !== status && (status === MemberStatus.APPROVED || status === MemberStatus.REJECTED)) {
+          this.rt.emitProjectMembershipUpdate(panelUser.id, {
+            projectId: project.id,
+            projectName: project.name,
+            status: status as "APPROVED" | "REJECTED",
+          });
+
+          // Si fue aprobado, unir al usuario a la sala del proyecto
+          if (status === MemberStatus.APPROVED) {
+            this.rt.joinProjectRoom(panelUser.id, project.id);
+          }
+        }
 
         return {
           ok: true as const,
@@ -66,6 +83,16 @@ export class SyncProjectMember {
         status,
       });
 
+      // Notificar si el nuevo miembro fue aprobado directamente
+      if (status === MemberStatus.APPROVED) {
+        this.rt.emitProjectMembershipUpdate(panelUser.id, {
+          projectId: project.id,
+          projectName: project.name,
+          status: "APPROVED",
+        });
+        this.rt.joinProjectRoom(panelUser.id, project.id);
+      }
+
       return {
         ok: true as const,
         member: {
@@ -83,10 +110,25 @@ export class SyncProjectMember {
         return { ok: false as const, error: "member_not_found" };
       }
 
+      const oldStatus = existing.status;
       const member = await this.projectRepo.updateMember(panelUser.id, project.id, {
         role,
         status,
       });
+
+      // Notificar cambio de estado si cambió a APPROVED o REJECTED
+      if (oldStatus !== status && (status === MemberStatus.APPROVED || status === MemberStatus.REJECTED)) {
+        this.rt.emitProjectMembershipUpdate(panelUser.id, {
+          projectId: project.id,
+          projectName: project.name,
+          status: status as "APPROVED" | "REJECTED",
+        });
+
+        // Si fue aprobado, unir al usuario a la sala del proyecto
+        if (status === MemberStatus.APPROVED) {
+          this.rt.joinProjectRoom(panelUser.id, project.id);
+        }
+      }
 
       return {
         ok: true as const,
@@ -106,6 +148,13 @@ export class SyncProjectMember {
       }
 
       await this.projectRepo.removeMember(panelUser.id, project.id);
+
+      // Notificar al usuario que fue removido del proyecto
+      this.rt.emitProjectMembershipUpdate(panelUser.id, {
+        projectId: project.id,
+        projectName: project.name,
+        status: "REMOVED",
+      });
 
       return { ok: true as const };
     }
